@@ -7,8 +7,10 @@ class OpenAIProvider(LLMProvider):
     def __init__(self, model_name: str = "gpt-4o", api_key: Optional[str] = None):
         super().__init__(model_name, api_key)
         self.client = OpenAI(api_key=self.api_key)
+        self.calls = 0
 
     def generate(self, prompt: str, system_prompt: Optional[str] = None) -> Dict[str, Any]:
+        self.calls += 1
         start_time = time.time()
         
         messages = []
@@ -40,6 +42,7 @@ class OpenAIProvider(LLMProvider):
         }
 
     def stream(self, prompt: str, system_prompt: Optional[str] = None) -> Generator[str, None, None]:
+        self.calls += 1
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})

@@ -1,7 +1,7 @@
 import time
 import os
 from typing import Dict, Any, Optional, Generator
-from llama_cpp import Llama
+# from llama_cpp import Llama
 from src.core.llm_provider import LLMProvider
 
 class LocalProvider(LLMProvider):
@@ -23,12 +23,12 @@ class LocalProvider(LLMProvider):
             raise FileNotFoundError(f"Model file not found at {model_path}. Please download it first.")
 
         # n_threads=None will use all available cores
-        self.llm = Llama(
-            model_path=model_path,
-            n_ctx=n_ctx,
-            n_threads=n_threads,
-            verbose=False
-        )
+        # self.llm = Llama(
+        #     model_path=model_path,
+        #     n_ctx=n_ctx,
+        #     n_threads=n_threads,
+        #     verbose=False
+        # )
 
     def generate(self, prompt: str, system_prompt: Optional[str] = None) -> Dict[str, Any]:
         start_time = time.time()

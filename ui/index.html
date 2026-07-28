@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="UI demo so sánh Chatbot baseline và ReAct Agent"
+    />
+    <title>ReAct Lab Console</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="ambient ambient-one"></div>
+    <div class="ambient ambient-two"></div>
+
+    <main class="shell">
+      <header class="topbar">
+        <a class="brand" href="/">
+          <span class="brand-mark">R</span>
+          <span>
+            <strong>ReAct Lab</strong>
+            <small>Chatbot vs Agent</small>
+          </span>
+        </a>
+        <div class="status"><span></span> Deterministic · Local</div>
+      </header>
+
+      <section class="workspace">
+        <div class="composer-panel">
+          <div class="panel-heading">
+            <div>
+              <span class="step-label">01</span>
+              <h2>Chọn hệ thống</h2>
+            </div>
+          </div>
+
+          <div class="mode-switch" role="radiogroup" aria-label="System mode">
+            <button class="mode" data-mode="chatbot" type="button">
+              <span class="mode-icon">C</span>
+              <span><strong>Chatbot</strong><small>One LLM call</small></span>
+            </button>
+            <button class="mode" data-mode="agent_v1" type="button">
+              <span class="mode-icon">V1</span>
+              <span><strong>Agent V1</strong><small>ReAct cơ bản</small></span>
+            </button>
+            <button class="mode active" data-mode="agent_v2" type="button">
+              <span class="mode-icon">V2</span>
+              <span><strong>Agent V2</strong><small>Chặn Action lặp</small></span>
+            </button>
+          </div>
+
+          <div class="panel-heading prompt-heading">
+            <div>
+              <span class="step-label">02</span>
+              <h2>Chọn provider</h2>
+            </div>
+          </div>
+
+          <div class="provider-switch" role="radiogroup" aria-label="LLM provider">
+            <button class="provider active" data-provider="demo" type="button">
+              <span class="provider-status"></span>
+              <span><strong>Demo local</strong><small>Không tốn quota</small></span>
+            </button>
+            <button class="provider" data-provider="gemini" type="button">
+              <span class="provider-status"></span>
+              <span><strong>Gemini live</strong><small>Dùng API key trong .env</small></span>
+            </button>
+            <button class="provider" data-provider="openai" type="button">
+              <span class="provider-status"></span>
+              <span><strong>OpenAI live</strong><small>Dùng API key trong .env</small></span>
+            </button>
+          </div>
+
+          <div class="panel-heading prompt-heading input-heading">
+            <div>
+              <span class="step-label">03</span>
+              <h2>Nhập yêu cầu</h2>
+            </div>
+          </div>
+
+          <form id="chat-form">
+            <textarea
+              id="message"
+              maxlength="2000"
+              rows="6"
+              placeholder="Ví dụ: Tôi muốn mua 2 iPhone dùng mã WINNER, giao 0.8 kg tới Hà Nội. Tổng bao nhiêu?"
+            ></textarea>
+            <div class="examples">
+              <button type="button" data-example="iphone">iPhone + WINNER</button>
+              <button type="button" data-example="macbook">MacBook hết hàng</button>
+              <button type="button" data-example="policy">Chính sách đổi trả</button>
+            </div>
+            <button class="run-button" type="submit">
+              <span>Chạy hệ thống</span>
+              <span class="arrow">↗</span>
+            </button>
+          </form>
+        </div>
+
+        <div class="result-panel">
+          <div class="result-header">
+            <div>
+              <span class="step-label">04</span>
+              <h2>Kết quả & trace</h2>
+            </div>
+            <button id="clear-button" class="clear-button" type="button">Xóa</button>
+          </div>
+
+          <div id="empty-state" class="empty-state">
+            <div class="orbit"><span></span></div>
+            <h3>Chưa có phiên chạy</h3>
+            <p>Chọn một ví dụ hoặc nhập yêu cầu để bắt đầu.</p>
+          </div>
+
+          <div id="result-content" class="result-content hidden">
+            <div class="metrics">
+              <div><span>LLM steps</span><strong id="llm-calls">0</strong></div>
+              <div><span>Tool calls</span><strong id="tool-calls">0</strong></div>
+              <div><span>Mode</span><strong id="result-mode">—</strong></div>
+            </div>
+            <div class="provider-used" id="provider-used">Demo local</div>
+
+            <article class="answer-card">
+              <span class="card-kicker">FINAL ANSWER</span>
+              <p id="answer"></p>
+            </article>
+
+            <div class="trace-heading">
+              <h3>Execution trace</h3>
+              <span id="tool-path">No tools</span>
+            </div>
+            <ol id="trace" class="trace"></ol>
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

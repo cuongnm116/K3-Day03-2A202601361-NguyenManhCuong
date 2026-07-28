@@ -51,6 +51,44 @@ The code is designed as a **Production Prototype**. It includes:
 - **Robust Provider Pattern**: Easily extendable to any LLM API.
 - **Clean Skeletons**: Focus on the logic that matters—the agent's reasoning process.
 
+## 🖥️ Run the Local UI
+
+The repository includes a dependency-free browser UI. It runs the existing
+Chatbot baseline or ReAct Agent V2 with deterministic local tools, so no API key
+is required.
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+python scripts/run_ui.py
+```
+
+Open:
+
+```text
+http://127.0.0.1:8000
+```
+
+Use the mode switch to compare Chatbot, Agent V1, and Agent V2 behavior. The result panel
+shows the final answer, LLM step count, tool count, tool path, and complete
+Thought–Action–Observation trace. Press `Ctrl+C` in the terminal to stop the
+server.
+
+The provider switch offers:
+
+- **Demo local:** deterministic and free; no API key required.
+- **Gemini live:** reads `GEMINI_API_KEY` and the model from `GEMINI_MODEL` or
+  `DEFAULT_MODEL` in `.env`.
+- **OpenAI live:** reads `OPENAI_API_KEY` and the model from `OPENAI_MODEL` or
+  `DEFAULT_MODEL` in `.env`.
+
+Example:
+
+```env
+DEFAULT_PROVIDER=gemini
+DEFAULT_MODEL=gemini-2.5-flash
+GEMINI_API_KEY=your_new_key
+```
+
 ---
 
 *Happy Coding! Let's build agents that actually work.*
