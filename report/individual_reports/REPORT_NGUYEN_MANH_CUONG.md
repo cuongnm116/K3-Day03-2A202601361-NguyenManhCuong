@@ -8,62 +8,64 @@
 
 ## I. Technical Contribution
 
-My role in this lab was mainly on the **review and verification side** of three core modules, working alongside the teammate who wrote the initial implementation:
+My assigned part of the lab was the **baseline system**: build the plain chatbot with a safe fallback behavior, and write the test coverage for both the chatbot and the tools it deliberately does *not* have access to.
 
-| Module | My contribution |
-|---|---|
-| `src/chatbot/chatbot.py` | Reviewed the baseline implementation to confirm it makes exactly one provider call with `tool_calls = 0`, and does not smuggle any pre-computed tool result into the system prompt. Ran `tests/test_chatbot_baseline.py` and checked both the static Q&A case and the multi-step case to confirm the chatbot falls back honestly instead of guessing numbers. |
-| `src/agent/agent.py` | Reviewed the ReAct loop (parser → executor → Observation → next provider call) and traced through `max_steps` behavior manually to confirm it terminates instead of looping forever. Ran `tests/test_agent_react_loop.py` and cross-checked the parsed Actions against the tool registry. |
-| `src/agent/agent_v2.py` | Reviewed the duplicate-action guard added on top of V1, verified the fingerprinting logic `(tool_name, canonical_json_arguments)` correctly identifies a repeated call, and ran `tests/test_agent_recovery.py` to confirm the fix. |
+| # | Task | File(s) |
+|---|---|---|
+| 9 | Built the Chatbot baseline and its safe fallback behavior | `src/chatbot/chatbot.py` |
+| 10 | Wrote tests for the Chatbot and the tool suite | `tests/test_chatbot_baseline.py`, `tests/test_tools.py` |
 
-**How I verified correctness:** rather than just reading the code, I re-ran the full suite (`python -m pytest -q -p no:cacheprovider`) and also executed `scripts/run_lab_evaluation.py` myself to reproduce the 5-case comparison independently, so I could confirm the numbers in the group report weren't just copy-pasted but actually reproducible on a clean run.
+**`src/chatbot/chatbot.py`:** The `Chatbot` class is intentionally the simplest possible baseline — one `llm.generate()` call, no loop, no tool access at all (`tool_calls` is hardcoded to `0` in the returned dict, not just "usually zero"). The part I focused on was the **safe fallback**, which lives entirely in the system prompt rather than in code logic: the chatbot is explicitly told it has no access to inventory, prices, coupons, shipping, or order systems, and that it must say it cannot verify the answer instead of inventing a number or claiming an order was placed. This matters because a single-call chatbot has no way to check its own answer against reality — the only lever available is instructing the model up front to refuse gracefully rather than guess. I also added the guard clause at the top of `chat()` that rejects empty/non-string input before it ever reaches the provider, so a bad call fails fast with a clear `ValueError` instead of silently generating a response to an empty prompt.
 
-- **Documentation:** Confirmed that the Observation returned to the loop always comes from the actual tool function output (never authored by the model), which is the core invariant the whole ReAct design depends on — I checked this specifically in `agent.py` by tracing where the Observation string gets constructed before being appended back into the next prompt.
+**`tests/test_chatbot_baseline.py`:** I wrote a `FakeLLM` deterministic stand-in for the real provider so the chatbot's orchestration could be tested without any API cost or network dependency. Two cases matter most:
+- `test_static_question_uses_exactly_one_llm_call_and_no_tools` — confirms a simple question like the return policy costs exactly 1 LLM call and 0 tool calls.
+- `test_multistep_question_returns_safe_fallback_without_tool_evidence` — feeds a question that needs live data (price + coupon + shipping) and asserts the answer contains an honest "cannot verify" instead of a fabricated total, and specifically checks that the word "inventory" appears in the system prompt actually sent to the model — i.e. the fallback instruction was really delivered, not just present in the source file.
+
+**`tests/test_tools.py`:** Since the chatbot has no tools, this suite exists to pin down exactly what the *agent* side would be working with, so both systems are being compared against the same ground truth. I covered: `check_stock` for a found item, an unknown item (`item_not_found` instead of a crash), a missing argument (`invalid_input`), and an explicit `out_of_stock` status case (`stock == 0` but `ok == True`, since "found but unavailable" is a different outcome than "not found"). Same pattern for `get_discount` (valid/expired/unknown/missing) and `calc_shipping` (valid Hanoi rate, missing weight, missing destination, negative weight, unsupported destination). I also added a determinism check confirming repeated calls with the same input return equal — but not the same mutable — objects, and coverage for the extended catalog/coupon/shipping-zone data (including accented vs. plain destination aliases like "Đà Nẵng" / "da nang" resolving to the same result).
 
 ---
 
 ## II. Debugging Case Study
 
-**Problem I investigated:** while running the test suite for `agent.py` (V1) against the query *"Is the iPhone in stock and what is its price?"*, I noticed `check_stock({"item_name": "iPhone"})` was executed twice in the trace, even though the first call already returned both the price and the stock count needed to answer.
+**Problem I found:** while writing `test_multistep_question_returns_safe_fallback_without_tool_evidence`, my first version of the assertion only checked that `"cannot verify"` appeared in the answer string. That passed even in a run where I temporarily broke the system prompt (removed the "never invent tool results" line) — because the `FakeLLM` I wrote just returns whatever fixed string I gave it, regardless of what system prompt it received. The test looked green but wasn't actually verifying that the fallback instruction was wired through correctly.
 
-**Log source:** `artifacts/traces/repeated_action_failed_trace.json`, cross-checked against the written root cause in `artifacts/traces/repeated_action_rca.md`.
+**Where I looked:** `tests/test_chatbot_baseline.py`, specifically how `FakeLLM.generate()` records `last_system_prompt`.
 
-**Diagnosis:** Tracing step by step, step 1 matched the expected path. Step 2 is the first divergence — same tool, same arguments, executed again for no new reason. `max_steps` does bound the loop overall, but it has no way of recognizing "this exact action already ran" versus "the agent is still making progress," so it can't prevent a wasted repeat call on its own. This told me the bug lived in the orchestration logic of `agent.py`, not in `check_stock` itself — the tool's output was correct both times.
+**Diagnosis:** The `FakeLLM` already stores `last_system_prompt` for exactly this reason, but my first test wasn't using it — I was only asserting on the output text, not on what was actually sent to the provider. That's a classic false-positive in a test built around a fixed/scripted response: the fake always returns the same content no matter what prompt it's given, so an assertion on the fake's output can't tell you whether the *input* was correct.
 
-**Solution:** This is exactly what `agent_v2.py` fixes: before executing an Action, it computes a fingerprint of `(tool_name, canonical_json_arguments)` and checks it against the actions already executed in the current request. If it's a repeat, the loop returns a structured `repeated_action` Observation instead of calling the tool again — so the model gets useful feedback ("you already did this") rather than silently burning an extra tool call. I confirmed the fix by re-running `tests/test_agent_recovery.py`:
+**Fix:** I added `assert "inventory" in llm.last_system_prompt` to the test, which checks the actual system prompt that reached the (fake) provider, not just the canned response. Re-running with the safe-fallback instruction deliberately removed from `chatbot.py` now correctly fails the test, confirming it actually catches the regression it's meant to catch.
 
 ```
-V1 tool executions: 2
-V2 tool executions: 1
+Before fix: test passes even with the fallback instruction removed (false positive)
+After fix:  test fails immediately if the fallback instruction is removed (correct)
 ```
 
 ---
 
 ## III. Personal Insights: Chatbot vs ReAct
 
-1. **Reasoning.** From reviewing both systems side by side, the clearest difference is that `agent.py`'s `Thought` step forces a checkpoint before every action — the model has to state what it still needs before it's allowed to act. `chatbot.py` has no such checkpoint; it goes straight from prompt to final answer, so there's no place in the code where you could catch it about to reason toward the wrong evidence.
+1. **Reasoning.** Building the chatbot side made the contrast concrete for me: `chatbot.py` has exactly one place where behavior can be steered — the system prompt — because there's no loop, no intermediate step, nothing to inspect between input and output. Whatever the fallback instruction says is the whole safety mechanism. The agent, by contrast, has a structural checkpoint (`Thought` → `Action` → `Observation`) where it can be *shown* it doesn't have enough information yet, rather than only being *told* in advance what it can't do.
 
-2. **Reliability.** Testing both systems on the return-policy and working-hours questions, they performed identically — one provider call, zero tools, both correct. The agent's extra orchestration bought nothing on these two cases. If I had only looked at these two, I would have concluded the extra ReAct machinery is overhead the lab doesn't need. It's only once I ran the multi-step cases (iPhone + coupon + shipping, out-of-stock MacBook) that the gap became obvious — the chatbot had to fall back to admitting uncertainty on all three, while the agent produced grounded, tool-verified answers.
+2. **Reliability.** On the two static questions (return policy, working hours) my chatbot performed identically to the agent — 1 call, correct answer, no wasted machinery. That's exactly what the baseline is supposed to do well. The difference only shows up on the three dynamic questions, where the chatbot has no way to check a price or stock count, so the safe fallback is the *correct* behavior, but it's also a dead end — the user gets an honest "I can't verify this" instead of an actual answer. Writing the fallback made me appreciate that "safe" and "useful" are two different goals, and the baseline can only ever hit the first one.
 
-3. **Observation.** The out-of-stock MacBook case was the most instructive one for me while reviewing `agent.py`: the `check_stock` Observation reporting zero stock was enough by itself for the loop to stop early and correctly refuse the purchase, without ever calling `calc_shipping`. That's the practical payoff of the Observation step — each tool result actually changes what the loop does next, instead of the model just continuing to talk.
+3. **Observation feedback.** The clearest gap for me, coming from the chatbot side, is that my system has no equivalent of an Observation. It cannot check `check_stock` and change its answer based on the real result — it can only be instructed in advance to admit uncertainty. Reading the agent's trace on the out-of-stock MacBook case (where the `check_stock` Observation with `stock == 0` was enough for the loop to stop and correctly refuse the purchase) showed me exactly what my baseline is missing: a feedback signal from the real world, not just a well-written prompt.
 
-My overall takeaway from reviewing rather than writing this code first-hand: the value of the ReAct pattern is very task-dependent. For lookups with a single static answer, it's pure overhead. For anything requiring several verified facts chained together, it's the only way to avoid the chatbot's two bad options — hallucinate a number or refuse to answer.
+My takeaway from building the baseline specifically: a chatbot with a good fallback is not a lesser version of an agent — it's the right choice for anything static — but it has a hard ceiling on any question that needs current, verifiable data, and no amount of prompt engineering can substitute for an actual tool call.
 
 ---
 
 ## IV. Future Improvements
 
-- **Input validation:** enforce a strict schema (JSON Schema / Pydantic) on every parsed Action before it reaches the executor, instead of trusting the model's output format — this is the first thing I'd want to see hardened after reviewing `agent.py`.
-- **Tool resilience:** once tools call real external systems instead of in-memory data, add timeouts, retries, and circuit breakers — the current tools are all synchronous and assume the "backend" never fails.
-- **Guardrails for write actions:** all three tools reviewed here are read-only; any future tool with side effects (placing an order, applying a refund) should require explicit user confirmation before `agent_v2.py`'s executor is allowed to run it.
-- **Observability:** persist a trace ID per request and redact any personal/payment data before logging, so failures like the repeated-action bug can be diagnosed in production the same way I diagnosed it here from a saved trace file.
-- **Evaluation beyond the scripted provider:** the 5-case results are all from a deterministic `ScriptedProvider`, so latency and token counts are zero by construction — a real rollout needs a second evaluation pass against a live model with latency/cost/error-rate tracking.
+- **Fallback testing at scale:** extend `test_chatbot_baseline.py` with a larger set of paraphrased dynamic questions to make sure the safe-fallback behavior generalizes, not just for the two exact phrasings currently tested.
+- **Tool test coverage for edge cases:** add tests for boundary values in `tools.py` (e.g. `weight = 0`, extremely large weights, case-sensitivity edge cases beyond the accented-destination check already covered).
+- **Structured fallback signal:** right now the chatbot's "I cannot verify" is just plain text; returning a structured flag (e.g. `{"needs_tool_access": true}`) alongside the answer would let a calling application detect the fallback programmatically instead of string-matching.
+- **Shared fixtures:** `FakeLLM` currently lives only in `test_chatbot_baseline.py` — moving it to a shared `conftest.py` would let the agent tests reuse the same deterministic provider instead of each maintaining a separate fake.
+- **Prompt-versioning tests:** since the whole safety mechanism for the chatbot lives in the system prompt string, adding a regression test that pins the exact required phrases (as I did with `"inventory"`) for every safety-relevant clause would catch future prompt edits that accidentally weaken the fallback.
 
 ---
 
 ## Reproduction
 
 ```powershell
-python -m pytest -q -p no:cacheprovider
-python scripts/run_lab_evaluation.py
+python -m pytest tests/test_chatbot_baseline.py tests/test_tools.py -q -p no:cacheprovider
 ```
